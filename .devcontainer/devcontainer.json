@@ -1,0 +1,25 @@
+{
+  "name": "Penguin API Workshop",
+  "image": "ghcr.io/rocker-org/devcontainer/tidyverse:4",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "REditorSupport.r",
+        "quarto.quarto"
+      ]
+    }
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libsodium-dev && Rscript -e \"options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/noble/latest')); install.packages(c('plumber2', 'httr2', 'palmerpenguins', 'tidymodels', 'here'))\"",
+  "postStartCommand": "sudo /usr/lib/rstudio-server/bin/rstudio-server start || true",
+  "forwardPorts": [8787, 8000],
+  "portsAttributes": {
+    "8787": {
+      "label": "RStudio Server",
+      "onAutoForward": "openBrowser"
+    },
+    "8000": {
+      "label": "Plumber API",
+      "onAutoForward": "notify"
+    }
+  }
+}

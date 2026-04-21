@@ -1,0 +1,23 @@
+---
+title: "Penguins: Body Mass Prediction"
+format:
+  html:
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{r}
+library(tidyverse)
+library(palmerpenguins)
+library(tidymodels)
+```
+
+## Explore
+
+```{r}
+glimpse(penguins)
+```
