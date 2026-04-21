@@ -1,0 +1,539 @@
+---
+title: "From Messy Notebook to Modular Model"
+author: "Ate Poorthuis — KU Leuven"
+format:
+  revealjs:
+    theme: simple
+    highlight-style: github
+    code-line-numbers: false
+    slide-number: true
+    incremental: false
+    footer: "From Messy Notebook to Modular Model"
+execute:
+  echo: true
+  eval: false
+---
+
+# Block 1 {.inverse}
+
+## From Notebook to Callable Function
+
+Modular Model? Or, how to turn your code into 'production'.
+
+
+## Who's in the room?
+
+Quick round:
+
+- Name and field
+- What languages do you have experience with? If any?
+- How much do you code day-to-day? What does your typical analysis look like?
+
+
+## The notebook: code, context, output together
+
+Notebooks (Quarto, R Markdown, Jupyter) combine three things in one file:
+
+- **Code** — executable, reproducible
+- **Context** — prose, equations, interpretation
+- **Output** — plots, tables, results inline
+
+## Notebook's core building block
+
+A **cell** looks like this:
+
+```r
+penguins |> count(species)
+```
+
+```
+  species       n
+  Adelie      152
+  Chinstrap    68
+  Gentoo      124
+```
+
+Great for exploratory, chronological analysis.
+
+
+## A notebook's limitation
+
+You've done the analysis for city X. Now someone wants city Y.
+
+. . .
+
+To predict for a new penguin, you edit a line buried in the file and re-run everything above it:
+
+```r
+# Somewhere on line 47...
+new_penguin <- tibble(flipper_length_mm = 195)  # ← edit this, re-run from top
+predict(penguin_fit, new_penguin)
+```
+
+. . .
+
+A notebook is optimised for sequential workflows that run from A-Z.
+
+It is not optimised for things that need repeating with different inputs.
+
+
+## Enter: the API 
+
+An **API** (Application Programming Interface) is a defined way for one piece of software to talk to another.
+
+. . .
+
+You already use them constantly:
+
+- Your weather app fetches a forecast → calls an API
+- `{osmdata}` downloads OpenStreetMap data → calls an API
+- You upload a photo to a social media platform → calls an API
+- You chat with Claude → calls an API
+
+## API's can exist anywhere
+
+A computer function is an API. But an **HTTP API** means: your code listens on a URL, accepts inputs as a request, and sends back a result as a response.
+
+The caller can be anything — a browser, a Python script, a Shiny app, a cron job.
+
+
+## Why does this matter for your analysis?
+
+Right now your R (or Python, or ...) model logic lives in a notebook. To use it, someone needs:
+
+. . .
+
+- R
+- Your packages
+- Your data
+- The notebook itself
+- An understanding of the whole workflow
+
+
+## How is code packaged?
+
+**Encapsulation**
+
+```
+cell  →  function  →  module / package  →  HTTP API
+```
+
+. . .
+
+| Form | What you get |
+|---|---|
+| Cell | Runs once, in order, in a specific environment |
+| Function | Takes inputs, returns outputs, callable anywhere |
+| Module / package | Versioned, documented, importable across projects |
+| HTTP API | Language-agnostic, callable from any machine or tool |
+
+
+
+## Where does code run?
+
+```
+local  →  remote server  →  serverless  →  in-browser
+```
+
+. . .
+
+These two axes are **independent**.
+
+A function can run locally or in the cloud.
+An HTTP API can run on your laptop or on a serverless platform.
+
+Today the idea is to move (a bit more) right on **both**.
+
+
+## Learning objectives
+
+By the end of this workshop you can:
+
+1. Explain what each step on the encapsulation and runtime axis buys you
+2. Refactor a messy notebook into a callable function
+3. Wrap that function as an HTTP API
+4. Call your own API from a browser, `curl`, or another R session
+
+
+## Get started with Codespaces
+
+1. https://github.com/atepoorthuis/api-workshop → Codespace opens in the browser
+2. Go to the **Ports** tab → open port **8787**
+3. Log in: `rstudio` / `rstudio`
+4. Everything is already installed
+
+. . .
+
+::: {.callout-tip}
+Give it a minute or two on first open — packages are pre-installed but RStudio Server needs a moment to start.
+:::
+
+
+# Code-along {.inverse}
+## Palmer Penguins Analysis
+
+
+## Load and explore
+
+Open `notebook/penguins_analysis.qmd` and run along.
+
+```r
+library(tidyverse)
+library(palmerpenguins)
+library(tidymodels)
+
+glimpse(penguins)
+```
+
+333 penguins, 8 variables. We'll predict **body mass** from **flipper length**.
+
+
+## Does flipper length predict body mass?
+
+```r
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(aes(colour = species)) +
+  geom_smooth(method = "lm")
+```
+
+A clear positive relationship — and species has an impact too. 
+
+
+## Fit a linear regression
+
+```r
+penguin_fit <- workflow() |>
+  add_formula(body_mass_g ~ flipper_length_mm) |>
+  add_model(linear_reg()) |>
+  fit(data = penguins)
+```
+
+The `workflow()` bundles the formula and the model into **one object**.
+
+## Read the model output
+
+```r
+tidy(penguin_fit)
+```
+
+```
+  term                estimate
+  (Intercept)          -5781
+  flipper_length_mm       50
+```
+
+. . .
+
+Every extra **mm of flipper length** predicts roughly **50g more body mass**.
+
+
+## Predict for a new observation
+
+```r
+new_penguin <- tibble(flipper_length_mm = 200)
+
+predict(penguin_fit, new_penguin)
+```
+
+```
+  .pred
+  4177
+```
+
+. . .
+
+This works. But to change the input you have to edit the file and re-run with all the complication that come with that.
+
+**That's the problem we are trying to address.**
+
+
+# From notebook to function {.inverse}
+
+## Anatomy of a function
+
+```r
+#            name          inputs
+#             ↓              ↓
+my_cool_function <- function(input) {
+
+  output <- input * 2 
+  output # ← the return value: last expression
+
+}
+```
+
+- **Name** — how you call it
+- **Inputs (arguments)** — what it needs to do its job
+- **Body** — the logic
+- **Return value** — the last expression is returned automatically
+
+
+## Anatomy of a function
+
+```r
+#            name          inputs
+#             ↓              ↓
+predict_body_mass <- function(model, flipper_length) {
+
+  new_data    <- tibble(flipper_length_mm = flipper_length)
+  predictions <- predict(model, new_data)
+  predictions$.pred   # ← the return value: last expression
+
+}
+```
+
+- **Name** — how you call it
+- **Inputs (arguments)** — what it needs to do its job
+- **Body** — the logic
+- **Return value** — the last expression is returned automatically
+
+
+## The refactored function
+
+```r
+predict_body_mass <- function(model, flipper_length) {
+  new_data    <- tibble(flipper_length_mm = flipper_length)
+  predictions <- predict(model, new_data)
+  predictions$.pred
+}
+```
+
+Call it with any input — no re-running the notebook:
+
+```r
+predict_body_mass(penguin_fit, flipper_length = 200)
+predict_body_mass(penguin_fit, flipper_length = 215)
+predict_body_mass(penguin_fit, flipper_length = 185)
+```
+
+
+
+## What's different about a function?
+
+| Notebook cell | Function |
+|---|---|
+| Runs top-to-bottom, once | Can be called anytime, with any input |
+| Result depends on global state | Result depends only on its arguments |
+| Re-run everything to change input | Call with a new argument |
+| Hard to test | Easy to test |
+
+
+# Documenting the function {.inverse}
+
+
+## Why document?
+
+Documentation makes the explicit what the functions does and how. It's like the 'contract' between the function and its user.
+
+Without it, the user has to read the source to understand:
+
+- What does it expect as inputs?
+- What does it return?
+- What happens with unusual inputs?
+
+
+## Roxygen comments
+
+R uses `#'` comments (roxygen) for function documentation — the same format used by every R package. Your editor uses this for help and auto-complete, and it can automatically turn into the documentation pages that you're already familiar with.
+
+```r
+#' Predict penguin body mass from flipper length
+#'
+#' @param model A fitted tidymodels workflow
+#' @param flipper_length Flipper length in mm (numeric)
+#' @return Predicted body mass in grams (numeric)
+predict_body_mass <- function(model, flipper_length) {
+  new_data    <- tibble(flipper_length_mm = flipper_length)
+  predictions <- predict(model, new_data)
+  predictions$.pred
+}
+```
+
+
+---
+
+# Block 2 {.inverse}
+## From Function to Service
+
+
+## Where does code actually run?
+
+Where did your Codespace run just now?
+
+Not on your laptop — on a virtual machine in a Microsoft data centre.
+That's a **remote server**. You accessed it through a browser.
+
+
+## The runtime options I
+
+| Option | What it means | Research tradeoff |
+|---|---|---|
+| Local | Runs on your machine | Full control; stops when laptop is off |
+| Remote server | Machine you or IT manage | Always-on; installing dependencies manually |
+| Remote container | 'Light' machine running in the cloud | Always on but dedicated to your service; dependencies 'baked' in |
+
+## The runtime options II
+
+| Option | What it means | Research tradeoff |
+|---|---|---|
+| Serverless | Platform spins up per request | No idle cost; data can't live there |
+| In-browser I | Port code to JavaScript | Zero server cost; limited to what can run in JS |
+| In-browser II | R/Python/... runs in the user's browser | Zero server cost; limited to WASM |
+
+## The Codespace is already a server
+
+We can use it to run our HTTP API as well!
+
+
+# Wrapping with plumber2 {.inverse}
+
+
+## Hello, plumber2
+
+```r
+library(plumber2)
+
+api() |>
+  api_get("/hello", function() {
+    list(message = "hello world")
+  }) |>
+  api_run(port = 8000)
+```
+
+Run this file → open port 8000 → `/__docs__/` → try `/hello`.
+
+## HTTP, GET, ports
+
+**WHAT?!**
+
+## From function to endpoint: one annotation
+
+Plumber2 turns your functions into HTTP APIs. The only difference between an R function and a plumber2 endpoint is the `#*` comments:
+
+```r
+#* Predict penguin body mass from flipper length
+#* @get /predict
+#* @query flipper_length:number Flipper length in mm
+#* @response 200:{body_mass_g:number}
+function(query) {
+  new_data    <- tibble(flipper_length_mm = as.numeric(query$flipper_length))
+  predictions <- predict(model, new_data)
+  list(body_mass_g = predictions$.pred)
+}
+```
+
+## Let's create an API togeter
+
+We'll do this in a new file that we'll call plumber.R.
+
+## Save the model
+
+```r
+saveRDS(penguin_fit, here::here("model.rds"))
+```
+
+`saveRDS` writes the whole `workflow` — preprocessing, formula, fitted model — to a single file.
+
+We'll load this once when the API starts.
+
+
+
+## Warm state vs cold state
+
+```r
+# COLD — model reloads on every request (slow)
+function(query) {
+  model    <- readRDS("model.rds")   # ← inside the function
+  new_data <- tibble(flipper_length_mm = as.numeric(query$flipper_length))
+  ...
+}
+```
+
+. . .
+
+```r
+# WARM — model loads once when the API starts (fast)
+library(tidymodels)
+model <- readRDS("model.rds")        # ← top of the file, runs at startup
+
+function(query) {
+  new_data <- tibble(flipper_length_mm = as.numeric(query$flipper_length))
+  ...
+}
+```
+
+
+## Run the API
+
+Add this at the bottom of `plumber.R` and source the whole file:
+
+```r
+api("plumber.R") |> api_run(port = 8000)
+```
+
+- Go to the **Ports** tab → open port **8000**
+- The Swagger UI loads at `/__docs__/`
+- Every endpoint is documented and testable from the browser
+
+## Query parameters
+
+http://url:port/endpoint?parameter1=value
+
+. . . 
+
+http://localhost:8000/predict?flipper_length=200
+
+# Three callers, one function {.inverse}
+
+
+## (a) Swagger UI
+
+Open `/__docs__/` in the browser.
+
+- Expand the `/predict` route
+- Enter a value for `flipper_length`
+- Hit **Execute**
+
+The UI shows the exact request URL and the JSON response — this is what every other caller sees.
+
+
+## (b) curl
+
+```bash
+curl "http://localhost:8000/predict?flipper_length=200"
+```
+
+```json
+{"body_mass_g": [4177]}
+```
+
+. . .
+
+`curl` is how you'd call this from:
+
+- a shell script
+- any language that can run a command
+
+
+## (c) From R with httr2
+
+```r
+library(httr2)
+
+request("http://localhost:8000/predict") |>
+  req_url_query(flipper_length = 200) |>
+  req_perform() |>
+  resp_body_json()
+```
+
+. . .
+
+The same endpoint works from Python (`requests`), JavaScript (`fetch`), a Shiny app, a scheduled job.
+
+
+## Extensions
+
+1. **Richer model** — add island as a predictor; new endpoint `/predict-extended`
+2. **Return a plot** — endpoint that returns a PNG with the prediction highlighted
+3. **Response structure** — status codes, error handling, 400 for bad inputs
+4. **Deploy** — push to DigitalOcean, get a live public HTTPS URL
